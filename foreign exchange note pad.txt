@@ -1,0 +1,260 @@
+import numpy as np
+import pandas as pd 
+import matplotlib.pyplot as plt
+from statsmodels.tsa.seasonal import seasonal_decompose
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import GridSearchCV
+from keras.preprocessing.sequence import TimeseriesGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Flatten
+from sklearn.metrics import accuracy_score, confusion_matrix,classification_report, r2_score,mean_absolute_error,mean_squared_error
+import datetime
+
+usd_data = pd.read_excel('C:/Python Files/dexinus.xlsx',parse_dates=True)
+gbp_data=pd.read_excel('C:/Python Files/INRGBP.xlsx',parse_dates=True)
+
+usd_df=pd.DataFrame(usd_data)
+usd_df = usd_data.iloc[10:usd_data.shape[0]]
+usd_df = usd_df.rename(columns={'FRED Graph Observations':'Date','Unnamed: 1':'INR'})
+usd_df['Date'] = pd.to_datetime(usd_df['Date'])
+usd_df['INR'] = pd.to_numeric(usd_df['INR'])
+
+gbp_df=pd.DataFrame(gbp_data)
+gbp_df = gbp_df.rename(columns={'Date':'Date','GBP':'INR'})
+gbp_df['Date'] = pd.to_datetime(gbp_df['Date'])
+gbp_df['INR'] = pd.to_numeric(gbp_df['INR'])
+
+usd_df = usd_df.dropna()
+usd_df = usd_df[usd_df.INR != 0]
+usd_df = usd_df.set_index('Date')
+usd_df.head()
+gbp_df = gbp_df.dropna()
+gbp_df = gbp_df[gbp_df.INR != 0]
+gbp_df = gbp_df.set_index('Date')
+gbp_df.head()
+
+usd_scaler = MinMaxScaler()
+usd_df2 = usd_df
+gbp_scaler = MinMaxScaler()
+gbp_df2 = gbp_df
+
+usd_train = usd_df2.iloc[-1125:-30]
+usd_test = usd_df2.iloc[-30:]
+usd_train = usd_scaler.fit_transform(usd_train)
+usd_test = usd_scaler.fit_transform(usd_test)
+
+gbp_train = gbp_df2.iloc[-1125:-30]
+gbp_test = gbp_df2.iloc[-30:]
+gbp_train = gbp_scaler.fit_transform(gbp_train)
+gbp_test = gbp_scaler.fit_transform(gbp_test)
+
+
+def usd_get_data(usd_data, usd_look_back):
+    usd_x, usd_y = [], []
+    for i in range (len(usd_data)-usd_look_back):
+        usd_x.append(usd_data[i:i+usd_look_back,0])
+        usd_y.append(usd_data[i+usd_look_back,0])
+    return np.array(usd_x), np.array(usd_y)
+
+usd_look_back = 1
+
+def gbp_get_data(gbp_data, gbp_look_back):
+    gbp_x, gbp_y = [], []
+    for i in range (len(gbp_data)-gbp_look_back):
+        gbp_x.append(gbp_data[i:i+gbp_look_back,0])
+        gbp_y.append(gbp_data[i+gbp_look_back,0])
+    return np.array(gbp_x), np.array(gbp_y)
+
+gbp_look_back = 1
+
+usd_x_train, usd_y_train = usd_get_data(usd_train,usd_look_back)
+usd_x_test,usd_y_test = usd_get_data(usd_test,usd_look_back)
+usd_x_train = usd_x_train.reshape(usd_x_train.shape[0],usd_x_train.shape[1],1)
+usd_x_test = usd_x_test.reshape(usd_x_test.shape[0],usd_x_test.shape[1],1)
+usd_n_features = usd_x_train.shape[1]
+
+
+gbp_x_train, gbp_y_train = gbp_get_data(gbp_train,gbp_look_back)
+gbp_x_test,gbp_y_test = gbp_get_data(gbp_test,gbp_look_back)
+gbp_x_train = gbp_x_train.reshape(gbp_x_train.shape[0],gbp_x_train.shape[1],1)
+gbp_x_test = gbp_x_test.reshape(gbp_x_test.shape[0],gbp_x_test.shape[1],1)
+gbp_n_features = gbp_x_train.shape[1]
+
+usd_model =Sequential()
+usd_model.add(LSTM(100,activation='relu',input_shape=(1,1)))
+usd_model.add(Dense(usd_n_features))
+#Compiling
+usd_model.compile(optimizer='adam', loss = 'mse')
+usd_model.summary()
+#Training
+usd_model.fit(usd_x_train,usd_y_train, epochs = 50, batch_size=27)
+usd_loss_per_epoch = usd_model.history.history['loss']
+plt.plot(range(len(usd_loss_per_epoch)),usd_loss_per_epoch)
+plt.show()
+
+gbp_model =Sequential()
+gbp_model.add(LSTM(100,activation='relu',input_shape=(1,1)))
+gbp_model.add(Dense(gbp_n_features))
+#Compiling
+gbp_model.compile(optimizer='adam', loss = 'mse')
+gbp_model.summary()
+#Training
+gbp_model.fit(gbp_x_train,gbp_y_train, epochs = 50, batch_size=27)
+gbp_loss_per_epoch = gbp_model.history.history['loss']
+plt.plot(range(len(gbp_loss_per_epoch)),gbp_loss_per_epoch)
+plt.show()
+
+usd_y_pred = usd_model.predict(usd_x_test)
+usd_tempo = usd_y_pred
+usd_y_pred = usd_scaler.inverse_transform(usd_y_pred)
+#Processing test shape
+usd_y_test = np.array(usd_y_test).reshape(-1,1)
+usd_y_test = usd_scaler.inverse_transform(usd_y_test)
+usd_data = usd_df2.iloc[-29:]
+usd_data['Predicted_INR'] = usd_y_pred
+
+gbp_y_pred = gbp_model.predict(gbp_x_test)
+gbp_tempo = gbp_y_pred
+gbp_y_pred = gbp_scaler.inverse_transform(gbp_y_pred)
+#Processing test shape
+gbp_y_test = np.array(gbp_y_test).reshape(-1,1)
+gbp_y_test = gbp_scaler.inverse_transform(gbp_y_test)
+gbp_data = gbp_df2.iloc[-29:]
+gbp_data['Predicted_INR'] = gbp_y_pred
+
+usd_plot2=usd_data.plot(figsize=(25,6))
+gbp_plot2=gbp_data.plot(figsize=(25,6))
+#plot2.show()
+
+no_of_days = 30
+#RMSE Calculation
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+
+usd_rmse = sqrt(mean_squared_error(usd_data['INR'],usd_data['Predicted_INR']))
+print(usd_rmse)
+usd_last_date = usd_data.index[-1].date()
+usd_n_days = no_of_days
+
+gbp_rmse = sqrt(mean_squared_error(gbp_data['INR'],gbp_data['Predicted_INR']))
+print(gbp_rmse)
+gbp_last_date = gbp_data.index[-1].date()
+gbp_n_days = no_of_days
+
+usd_future_dates = []
+for usd_day in range(usd_n_days):
+    usd_date = (usd_last_date + datetime.timedelta(days = usd_day)).isoformat()
+    usd_future_dates.append(usd_date)
+
+usd_dummy_array = np.empty((30,2))
+usd_dummy_array[:] = np.nan
+
+usd_future_dates = pd.to_datetime(usd_future_dates)
+usd_index = usd_future_dates
+usd_columns = ['usd_INR','usd_Predicted_INR']
+usd_future_data = pd.DataFrame(usd_dummy_array,columns=usd_columns,index=usd_index)
+usd_future_data.iloc[0,0] = float(usd_x_test[-1])
+usd_future_data.iloc[0,1] = float(usd_tempo[-1])
+
+for i in range(0,usd_n_days-1):
+    usd_future_data['usd_INR'][i+1] = usd_future_data['usd_Predicted_INR'][i]
+    usd_y = np.array(float(usd_future_data['usd_INR'][i+1]))
+    usd_y = usd_y.reshape(1,1,1)
+    usd_pred = usd_model.predict(usd_y)
+    usd_future_data['usd_Predicted_INR'][i+1] = usd_pred
+
+usd_t = usd_future_data.usd_INR
+usd_z = usd_future_data.usd_Predicted_INR
+
+usd_t = np.array(usd_t)
+usd_t = usd_t.reshape(usd_t.shape[0],1)
+usd_z = np.array(usd_z)
+usd_z = usd_z.reshape(usd_z.shape[0],1)
+
+usd_t = usd_scaler.inverse_transform(usd_t)
+usd_z = usd_scaler.inverse_transform(usd_z)
+
+
+
+gbp_future_dates = []
+for gbp_day in range(gbp_n_days):
+    gbp_date = (gbp_last_date + datetime.timedelta(days = gbp_day)).isoformat()
+    gbp_future_dates.append(gbp_date)
+
+gbp_dummy_array = np.empty((30,2))
+gbp_dummy_array[:] = np.nan
+
+gbp_future_dates = pd.to_datetime(gbp_future_dates)
+gbp_index = gbp_future_dates
+gbp_columns = ['gbp_INR','gbp_Predicted_INR']
+gbp_future_data = pd.DataFrame(gbp_dummy_array,columns=gbp_columns,index=gbp_index)
+
+gbp_future_data.iloc[0,0] = float(gbp_x_test[-1])
+gbp_future_data.iloc[0,1] = float(gbp_tempo[-1])
+
+for i in range(0,gbp_n_days-1):
+    gbp_future_data['gbp_INR'][i+1] = gbp_future_data['gbp_Predicted_INR'][i]
+    gbp_y = np.array(float(gbp_future_data['gbp_INR'][i+1]))
+    gbp_y = gbp_y.reshape(1,1,1)
+    gbp_pred = gbp_model.predict(gbp_y)
+    gbp_future_data['gbp_Predicted_INR'][i+1] = gbp_pred
+
+gbp_t = gbp_future_data.gbp_INR
+gbp_z = gbp_future_data.gbp_Predicted_INR
+
+gbp_t = np.array(gbp_t)
+gbp_t = gbp_t.reshape(gbp_t.shape[0],1)
+gbp_z = np.array(gbp_z)
+gbp_z = gbp_z.reshape(gbp_z.shape[0],1)
+
+gbp_t = gbp_scaler.inverse_transform(gbp_t)
+gbp_z = gbp_scaler.inverse_transform(gbp_z)
+
+usd_actual_data = [74.14,74.1838,74.2044,74.29,74.29,74.33,74.56,74.51,74.4803,74.5011,74.3231,74.58,74.81,74.76,74.53,74.488,74.4776,74.56,74.51,74.54,74.55,74.61,74.631,74.6062,74.85,74.6,74.49,74.46,74.44,74.4408]
+gbp_actual_data=[100.26,100.53,100.54,100.50,100.69,101.04,100.99,100.67,100.86,100.89,100.89,101.21,101.33,101.47,101.33,101.55,101.73,101.41,101.43,101.16,100.64,100.57,100.91,100.87,101.19,100.73,100.90,100.85,100.30,100.75]
+
+usd_future_data['usd_INR'] = usd_t
+usd_future_data['usd_Predicted_INR'] = usd_z
+usd_future_data['usd_Actual_INR'] = usd_actual_data
+usd_rmse = sqrt(mean_squared_error(usd_future_data['usd_Actual_INR'],usd_future_data['usd_Predicted_INR']))
+print('RMSE of the usd_predicted data:',usd_rmse)
+print(usd_future_data)
+
+# usd_data['usd_INR'].plot(legend = True, figsize=(30,16))
+# usd_data['usd_Predicted_INR'].plot(legend = True, figsize=(30,16))
+# usd_future_data['usd_Predicted_INR'].plot(legend = True,figsize=(30,16))
+# usd_future_data['usd_Actual_INR'].plot(legend = True,figsize=(30,16))
+# plt.figure(figsize=(30,12))
+# plt.xticks(fontsize=20)
+# plt.yticks(fontsize=20)
+# plt.plot(usd_df.index,usd_df.INR, label = "usd_Actual_INR_value",color='Black',linewidth=6)
+# plt.plot(usd_future_data.usd_index,usd_future_data.usd_Predicted_INR, label = "usd_Predicted_INR_value",color='Red',linewidth=6)
+# plt.xlabel('usd_Date',fontsize=20)
+# plt.ylabel('usd_INR',fontsize=20)
+# plt.title('{} DAYS PREDICTION'.format(usd_n_days),fontsize=40)
+# plt.legend(fontsize=20)
+# plt.show()
+
+
+gbp_future_data['gbp_INR'] = gbp_t
+gbp_future_data['gbp_Predicted_INR'] = gbp_z
+gbp_future_data['gbp_Actual_INR'] = gbp_actual_data
+
+gbp_rmse = sqrt(mean_squared_error(gbp_future_data['gbp_Actual_INR'],gbp_future_data['gbp_Predicted_INR']))
+print('RMSE of the gbp_predicted data:',gbp_rmse)
+print(gbp_future_data)
+
+# gbp_data['gbp_INR'].plot(legend = True, figsize=(30,16))
+# gbp_data['gbp_Predicted_INR'].plot(legend = True, figsize=(30,16))
+# gbp_future_data['gbp_Predicted_INR'].plot(legend = True,figsize=(30,16))
+# gbp_future_data['gbp_Actual_INR'].plot(legend = True,figsize=(30,16))
+# plt.figure(figsize=(30,12))
+# plt.xticks(fontsize=20)
+# plt.yticks(fontsize=20)
+# plt.plot(gbp_df.index,gbp_df.INR, label = "gbp_Actual_INR_value",color='Black',linewidth=6)
+# plt.plot(gbp_future_data.gbp_index,gbp_future_data.gbp_Predicted_INR, label = "gbp_Predicted_INR_value",color='Red',linewidth=6)
+# plt.xlabel('gbp_Date',fontsize=20)
+# plt.ylabel('gbp_INR',fontsize=20)
+# plt.title('{} DAYS PREDICTION'.format(gbp_n_days),fontsize=40)
+# plt.legend(fontsize=20)
+# plt.show()
